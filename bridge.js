@@ -1,0 +1,23 @@
+(() => {
+'use strict';
+const $=id=>document.getElementById(id);let ready=false,running=false,pointer=null;
+const settings=$('settings');
+for(const side of ['a','b']){const field=document.createElement('fieldset');field.className=side;field.innerHTML=`<legend>Pendulum ${side.toUpperCase()}</legend><label class="inline">Configuration <select id="${side}-n"><option value="2">Double</option><option value="3">Triple</option></select></label><div class="row"><span>Link</span><span>Angle (°)</span><span>Velocity (rad/s)</span></div>`;for(let i=0;i<3;i++)field.innerHTML+=`<div class="row" id="${side}-row-${i}"><span>Link ${i+1}</span><input aria-label="${side.toUpperCase()} link ${i+1} angle degrees" id="${side}-q-${i}" type="number" min="-180" max="180" step="0.001" value="${[120,100,75][i]}"><input aria-label="${side.toUpperCase()} link ${i+1} angular velocity" id="${side}-v-${i}" type="number" min="-10" max="10" step="0.01" value="0"></div>`;settings.append(field);}
+function call(name,...args){if(ready)return window.wasm_exports[name](...args);}
+function error(message){$('loading').hidden=false;$('loading').textContent=message;}
+window.addEventListener('error',e=>error(`Engine error: ${e.message}`));window.addEventListener('unhandledrejection',e=>error(`Engine error: ${e.reason}`));
+function read(side){return [Number($(side+'-n').value),...[0,1,2].map(i=>Number($(side+'-q-'+i).value)),...[0,1,2].map(i=>Number($(side+'-v-'+i).value))];}
+function valid(){for(const input of document.querySelectorAll('input[type=number]'))if(!input.checkValidity()||input.value.trim()===''){input.reportValidity();return false;}return true;}
+function showRows(){for(const side of ['a','b'])$(side+'-row-2').hidden=$(side+'-n').value!=='3';}
+function run(value){running=value;call('toy_run',value?1:0);$('start').textContent=value?'Pause':'Start';$('start').setAttribute('aria-pressed',String(value));}
+function reset(){if(!valid())return false;run(false);for(let i=0;i<2;i++)call('toy_config',i,...read(['a','b'][i]));showRows();$('status').textContent='Starting conditions applied. Press Start.';return true;}
+function copy(){for(const suffix of ['n',...['q','v'].flatMap(kind=>[0,1,2].map(i=>`${kind}-${i}`))])$('b-'+suffix).value=$('a-'+suffix).value;}
+$('same').onclick=()=>{if(!valid())return;copy();reset();$('status').textContent='Identical starts — the same simulation steps keep A and B synchronized.';run(true);};
+$('different').onclick=()=>{if(!valid())return;const q=Number($('a-q-0').value)+Number($('offset').value);if(q < -180||q >180){$('status').textContent='Choose an offset that keeps B’s first angle within −180° to 180°.';return;}copy();$('b-q-0').value=String(q);reset();$('status').textContent=`B starts ${$('offset').value}° away. Watch the tip separation grow.`;run(true);};
+$('start').onclick=()=>run(!running);$('reset').onclick=reset;$('home').onclick=()=>{call('toy_home');$('zoom').value='1';};$('zoom').oninput=()=>call('toy_zoom',Number($('zoom').value));
+settings.addEventListener('change',()=>reset());showRows();
+window.miniquad_add_plugin({name:'toy_bridge',version:'0.1',register_plugin(imports){imports.env.toy_ready=()=>{ready=true;$('loading').hidden=true;for(const id of ['start','reset','home','same','different'])$(id).disabled=false;reset();};}});
+const canvas=$('glcanvas');canvas.addEventListener('pointerdown',e=>{if(!ready||pointer)return;e.preventDefault();canvas.focus();canvas.setPointerCapture(e.pointerId);pointer={id:e.pointerId,x:e.clientX,y:e.clientY};});canvas.addEventListener('pointermove',e=>{if(pointer?.id!==e.pointerId)return;call('toy_orbit',-(e.clientX-pointer.x)*.007,(e.clientY-pointer.y)*.006);pointer.x=e.clientX;pointer.y=e.clientY;});for(const event of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(event,()=>pointer=null);canvas.addEventListener('keydown',e=>{const d={ArrowLeft:[-.08,0],ArrowRight:[.08,0],ArrowUp:[0,.06],ArrowDown:[0,-.06]}[e.key];if(d){e.preventDefault();call('toy_orbit',...d);}});canvas.addEventListener('contextmenu',e=>e.preventDefault());window.addEventListener('blur',()=>{pointer=null;if(ready)run(false);});document.addEventListener('visibilitychange',()=>{pointer=null;if(document.hidden&&ready)run(false);});
+function frame(){if(ready){$('time').textContent=call('toy_time').toFixed(2)+' s';$('difference').textContent='Tip separation: '+call('toy_difference').toFixed(6)+' m';}requestAnimationFrame(frame);}frame();if(!window.WebAssembly)error('This browser needs WebAssembly.');else window.load('toy.wasm');setTimeout(()=>{if(!ready)error('The WebGL engine has not started. Reload to try again.');},20000);
+
+})();
